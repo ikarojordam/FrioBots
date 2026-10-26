@@ -9688,6 +9688,8 @@ async function admPanelTickets(guild) {
         new ButtonBuilder().setCustomId('adm_ticket_panels').setLabel('Gerenciar Painéis').setEmoji(E.modo).setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('adm_ticket_create').setLabel('Criar Painel').setEmoji(E.adicionar).setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('frioai:global').setLabel('Ligar / Desligar IA').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('frioai:teach').setLabel('Ensinar IA').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('frioai:knowledge').setLabel('Base de conhecimento').setStyle(ButtonStyle.Secondary),
       ),
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('adm_back').setLabel('Voltar').setEmoji(E.voltar).setStyle(ButtonStyle.Secondary),
