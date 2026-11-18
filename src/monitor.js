@@ -1,5 +1,5 @@
 'use strict';
-const { log } = require('../core/logger');
+const { log } = require('./logger');
 function startMemoryMonitor(intervalMs = 60000) {
   const timer = setInterval(() => {
     const { rss, heapUsed, heapTotal, external } = process.memoryUsage();
