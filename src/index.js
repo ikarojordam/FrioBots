@@ -8347,7 +8347,7 @@ function devHub() {
     )
     .setFooter({ text: `Frio Bot ${BOT_VERSION}` }).setTimestamp();
 
-  const menu = new StringSelectMenuBuilder().setCustomId('dev_cat_pick').setPlaceholder('📂 Escolha uma categoria')
+  const menu = new StringSelectMenuBuilder().setCustomId('dev_cat_pick').setPlaceholder('Escolha uma categoria')
     .addOptions(
       { label: 'Servidor', description: 'Setups, backup, rejoin', value: 'servidor', emoji: E.discord },
       { label: 'Gerenciamento', description: 'Premium, verificados, injetar', value: 'gerenciamento', emoji: E.modo },
@@ -8364,7 +8364,7 @@ function devHub() {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('dev_dashboard').setLabel('Dashboard').setEmoji(E.analytics).setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('dev_broadcast').setLabel('Broadcast').setEmoji(E.megafone).setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('dev_personalizar').setLabel('Personalizar Bot').setEmoji('🎨').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('dev_personalizar').setLabel('Personalizar Bot').setEmoji(E.config).setStyle(ButtonStyle.Primary),
       ),
     ],
   };
@@ -9446,12 +9446,12 @@ function adminHub() {
     .setTimestamp();
   const menu = new StringSelectMenuBuilder()
     .setCustomId('adm_cat_pick')
-    .setPlaceholder('📂 Escolha uma categoria')
+    .setPlaceholder('Escolha uma categoria')
     .addOptions(
       { label: 'Servidor', description: 'Info, backup, anúncios', value: 'servidor', emoji: E.discord },
       { label: 'Gerenciamento', description: 'Painéis, configurar, sorteios', value: 'gerenciamento', emoji: E.modo },
       { label: 'Moderação', description: 'Tickets, usuários, manutenção', value: 'moderacao', emoji: E.mod },
-      { label: 'Música', description: 'Player (premium)', value: 'musica', emoji: '🎵' },
+      { label: 'Música', description: 'Player (premium)', value: 'musica', emoji: E.musica || E.config },
       { label: 'Versículo', description: 'Versículo do dia', value: 'versiculo', emoji: E.jesus },
       { label: 'Loja', description: 'Produtos e estoque', value: 'loja', emoji: E.carrinho },
     );
@@ -10688,11 +10688,44 @@ async function roletaGirar(i) {
 // Namespace ownership prevents multiple handlers from racing for the same ACK.
 function isDedicatedInteraction(i) {
   const cid = i.customId || '';
-  return (i.isStringSelectMenu() && ['dev_cat_pick', 'adm_cat_pick', 'roleta_edit:pick', 'roleta_del:pick'].includes(cid))
+  return (i.isChatInputCommand() && ['dev','admin'].includes(i.commandName))
+    || (i.isButton() && ['frio_panel:dev:home','frio_panel:admin:home'].includes(cid))
+    || (i.isStringSelectMenu() && ['dev_cat_pick', 'adm_cat_pick', 'roleta_edit:pick', 'roleta_del:pick'].includes(cid))
     || (i.isChatInputCommand() && ['roleta', 'config', 'solicitar'].includes(i.commandName))
     || /^(roleta:|roleta_cfg:|roleta_usr:|roleta_modal:|roleta_usr_modal:|cfgstr:|str:|strap:|strcfg:|strq:|frio_bkp:|frio_medpix_edit:|frio_ar_toggle:)/.test(cid)
     || ['dev_personalizar', 'frio_dev_customization_save', 'frio_medpix_save'].includes(cid);
 }
+// /dev and /admin have their own route: no DB, maintenance checks or legacy middleware before ACK.
+interactionRouter.register('admin-dev-command', i => i.isChatInputCommand() && ['dev', 'admin'].includes(i.commandName), async (i) => {
+  if (!i.guild) return i.reply({ content: 'Abra este painel dentro de um servidor.', flags: EPHEMERAL });
+  const dev = i.commandName === 'dev';
+  if (dev && !isDeveloper(i.user.id)) return i.reply({ content: 'Apenas desenvolvedores podem abrir este painel.', flags: EPHEMERAL });
+  if (!dev) {
+    const quickAdmin = isDeveloper(i.user.id) || i.user.id === i.guild.ownerId ||
+      i.memberPermissions?.has?.(PermissionFlagsBits.Administrator);
+    if (!quickAdmin) {
+      await i.deferReply({ flags: EPHEMERAL });
+      if (!await isAdmin(i.member || i.user, i.guild)) return i.editReply({ content: 'Você não tem permissão administrativa.' });
+      return i.editReply(adminHub());
+    }
+  }
+  return i.reply({ ...(dev ? devHub() : adminHub()), flags: EPHEMERAL });
+});
+
+interactionRouter.register('admin-dev-navigation', i => i.isButton() &&
+  ['frio_panel:dev:home','frio_panel:admin:home'].includes(i.customId), async i => {
+  if (!i.guild) return i.reply({ content: 'Disponível apenas em servidores.', flags: EPHEMERAL });
+  const dev = i.customId === 'frio_panel:dev:home';
+  if (dev && !isDeveloper(i.user.id)) return i.reply({ content: 'Acesso negado.', flags: EPHEMERAL });
+  if (!dev && !i.memberPermissions?.has?.(PermissionFlagsBits.Administrator) &&
+      i.user.id !== i.guild.ownerId && !isDeveloper(i.user.id)) {
+    await i.deferReply({ flags: EPHEMERAL });
+    if (!await isAdmin(i.member || i.user, i.guild)) return i.editReply({ content: 'Acesso negado.' });
+    return i.editReply(adminHub());
+  }
+  return i.update(dev ? devHub() : adminHub());
+});
+
 interactionRouter.register('hub-category', i => i.isStringSelectMenu() && ['dev_cat_pick', 'adm_cat_pick'].includes(i.customId), async (i) => {
   if (!i.isStringSelectMenu() || !['dev_cat_pick', 'adm_cat_pick'].includes(i.customId)) return;
   try {
@@ -10724,7 +10757,10 @@ interactionRouter.register('hub-category', i => i.isStringSelectMenu() && ['dev_
       return i.editReply({ content: 'Categoria inválida ou desatualizada.' });
     }
     const panel = await routes[v]();
-    return i.editReply(panel);
+    const rootId = isDevMenu ? 'frio_panel:dev:home' : 'frio_panel:admin:home';
+    const back = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(rootId).setLabel('Voltar ao início').setEmoji(E.voltar).setStyle(ButtonStyle.Secondary));
+    return i.editReply({ ...panel, components: [...(panel.components || []), back] });
   } catch (err) {
     console.error('[FRIO HUB ROUTER]', i.customId, err);
     const msg = { content: `Não foi possível abrir esse menu: ${String(err?.message || err).slice(0,160)}`, embeds: [], components: [] };
