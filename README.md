@@ -47,6 +47,16 @@ Leia seção **Segurança** deste README antes do primeiro commit. Resumo: sem s
 ## Atualização de recursos (16/10/2026)
 Os novos campos da loja e do hub de apostas dependem da migração `src/migrations/2026-10-16-frio-features.sql` no Supabase. **Esse arquivo não está incluído neste pacote** — use a sua cópia original (o bot só funciona nesses recursos depois de rodá-la). Para a verificação, rode `src/migrations/verification-panels.sql`. Os backups usam a tabela `guild_backups` existente. A restauração é best-effort: permissões e itens recriáveis são restaurados, mas IDs originais de canais/cargos não podem ser preservados e o Discord não permite reconstruir autoria original de mensagens.
 
+## Correção v6.9.7 — abertura dos painéis
+
+- Recuperação de emoji customizado inválido agora também no nível do REST (`installRestEmojiRecovery`): `channel.send`, `message.edit`, webhooks e respostas de interação são reenviados uma vez sem os emojis, em vez de o painel não abrir.
+- Hubs `/dev` e `/admin`: o botão "Voltar ao início" só é adicionado se o painel ainda não tiver um "Voltar" e houver espaço (limite de 5 linhas do Discord).
+
+## Correção v6.9.6 — botões das interfaces
+
+- **Causa:** `src/ticket-gemini.js` registrava um segundo `client.on('interactionCreate')` para os botões `frioai:*` (Ligar/Desligar IA, Ensinar IA, Base de conhecimento, controles da IA dentro do ticket) e o modal `frioai:teach:submit`. O roteador central também considerava esses IDs seus (`legacy-core`), não achava handler e respondia "Este menu não está disponível" antes — o clique falhava.
+- **Correção:** o handler agora é exportado (`matchesInteraction` / `handleInteraction`) e registrado como rota própria `ticket-ai`; o prefixo `frioai:` entrou em `isDedicatedInteraction`. Voltou a existir um único listener `interactionCreate`.
+
 ## Atualização auditada v6.9.4 (17/11/2026)
 
 Esta entrega **não é uma certificação de funcionamento em produção**. Mantém as funcionalidades do `src/index.js` legado e extraiu partes críticas para módulos sem recriar do zero as regras de tickets, loja e sistemas administrativos.
@@ -336,3 +346,29 @@ Não abra issue pública. Fale direto com o dono do repositório (mensagem priva
 ## Organização compacta em `src/`
 
 Os arquivos JavaScript de produção foram reunidos diretamente em `src/`, sem subpastas para módulos. Testes, ferramentas auxiliares e migrações também ficam dentro de `src/` em `tests/`, `scripts/` e `migrations/`. Na raiz ficam apenas os arquivos exigidos pela hospedagem e o `README.md`. O ponto de entrada é `src/index.js`, configurado no `package.json` e `discloud.config`.
+
+
+## Correção de inicialização — v6.9.4 (revisão de imports)
+
+- Corrigido `src/monitor.js`: `require('../core/logger')` para `require('./logger')` após a unificação dos módulos em `src/`.
+- Adicionado teste `src/tests/localImports.test.js` para validar a existência dos caminhos de todos os `require()` relativos literais.
+- Esta correção resolve o `MODULE_NOT_FOUND` apresentado no log, não comprova funcionamento do bot conectado ao Discord/Supabase.
+
+## Reconstrução dos comandos /dev e /admin (v6.9.4)
+
+- Rota dedicada para abertura dos painéis, evitando verificações de manutenção e consultas ao banco antes de responder.
+- `/dev`: exclusivo dos usuários configurados em `DEVELOPER_IDS` ou `OWNER_ID`.
+- `/admin`: administradores do servidor, proprietário, desenvolvedores e cargo administrativo definido no banco.
+- Categorias continuam ligadas às ações do projeto original, com botão de retorno ao menu inicial.
+- Selects e painéis utilizam embeds tradicionais (sem Components V2).
+- As ações internas legadas foram preservadas; algumas ainda dependem de configurações Supabase e teste em servidor real.
+
+Para usar, reinstale os arquivos completos e reinicie o serviço. Não coloque tokens no arquivo compactado.
+
+## Correção de emojis rejeitados (v6.9.5)
+
+O Discord pode rejeitar componentes com `COMPONENT_INVALID_EMOJI` quando o emoji personalizado foi apagado, está indisponível ou não é utilizável pelo bot. `src/emojiRecovery.js` tenta o envio normal. Somente quando o Discord rejeita especificamente por emoji inválido, ele repete a operação uma vez sem os emojis personalizados dos componentes desse painel; IDs, rótulos, menus, embeds e lógica permanecem. Não são inseridos emojis Unicode. Emite `invalid_custom_emoji_recovered`. Para exibir todos os ícones, corrija os IDs em `src/emojis.js` e garanta o acesso do bot aos respectivos emojis.
+
+**Outros avisos dos logs:** `Missing Permissions` na criação de cargo Dev requer permissão de Gerenciar Cargos e hierarquia adequada, não sendo corrigido pelo fallback; `JWT_SECRET ausente` desativa as rotas de painel correspondentes; `SIGTERM` registra encerramento externo/redeploy, não prova crash por memória. `ready` e `color` são avisos de depreciação que precisam de revisão separada.
+
+**Validação:** 23 testes locais passaram, incluindo três testes específicos da recuperação de emoji. Não foi realizado teste real no Discord/Discloud.
