@@ -57,7 +57,7 @@ const E = require('./emojis');
 // ═══════════════════════════════════════════════════════════
 // VERSÃO
 // ═══════════════════════════════════════════════════════════
-const BOT_VERSION = 'v6.9.4';
+const BOT_VERSION = 'v6.9.7';
 const BOT_START_TIME = Date.now();
 
 // ═══════════════════════════════════════════════════════════
@@ -132,6 +132,7 @@ const supabase = initSupabase();
 const { createDiscordClient } = require('./discordClient');
 const client = createDiscordClient();
 
+require('./emojiRecovery').installRestEmojiRecovery(client.rest, method => console.warn('[EMOJI] emoji customizado inválido recuperado em', method));
 const interactionRouter = createInteractionRouter(client, { ephemeral: MessageFlags.Ephemeral, beforeDispatch: remapLegacyCommand });
 
 // ═══════════════════════════════════════════════════════════
@@ -10692,7 +10693,7 @@ function isDedicatedInteraction(i) {
     || (i.isButton() && ['frio_panel:dev:home','frio_panel:admin:home'].includes(cid))
     || (i.isStringSelectMenu() && ['dev_cat_pick', 'adm_cat_pick', 'roleta_edit:pick', 'roleta_del:pick'].includes(cid))
     || (i.isChatInputCommand() && ['roleta', 'config', 'solicitar'].includes(i.commandName))
-    || /^(roleta:|roleta_cfg:|roleta_usr:|roleta_modal:|roleta_usr_modal:|cfgstr:|str:|strap:|strcfg:|strq:|frio_bkp:|frio_medpix_edit:|frio_ar_toggle:)/.test(cid)
+    || /^(roleta:|roleta_cfg:|roleta_usr:|roleta_modal:|roleta_usr_modal:|cfgstr:|str:|strap:|strcfg:|strq:|frio_bkp:|frio_medpix_edit:|frio_ar_toggle:|frioai:)/.test(cid)
     || ['dev_personalizar', 'frio_dev_customization_save', 'frio_medpix_save'].includes(cid);
 }
 // /dev and /admin have their own route: no DB, maintenance checks or legacy middleware before ACK.
@@ -10758,9 +10759,13 @@ interactionRouter.register('hub-category', i => i.isStringSelectMenu() && ['dev_
     }
     const panel = await routes[v]();
     const rootId = isDevMenu ? 'frio_panel:dev:home' : 'frio_panel:admin:home';
+    // Só acrescenta "Voltar ao início" se o painel ainda não tiver um botão de voltar e houver espaço (máx. 5 linhas).
+    const rows = panel.components || [];
+    const hasBack = rows.some(r => (r.toJSON ? r.toJSON() : r).components?.some(c => ['dev_back', 'adm_back', rootId].includes(c.custom_id)));
+    if (hasBack || rows.length >= 5) return i.editReply({ ...panel, components: rows.slice(0, 5) });
     const back = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(rootId).setLabel('Voltar ao início').setEmoji(E.voltar).setStyle(ButtonStyle.Secondary));
-    return i.editReply({ ...panel, components: [...(panel.components || []), back] });
+    return i.editReply({ ...panel, components: [...rows, back] });
   } catch (err) {
     console.error('[FRIO HUB ROUTER]', i.customId, err);
     const msg = { content: `Não foi possível abrir esse menu: ${String(err?.message || err).slice(0,160)}`, embeds: [], components: [] };
@@ -10992,6 +10997,9 @@ interactionRouter.register('roulette-select', i => i.isStringSelectMenu() && ['r
 // [PARTE 9/12] INTERACTIONCREATE + EVENTOS + HTTP + LOGIN
 // v6.8.0 — custom emojis aplicados em todos os handlers
 // ═══════════════════════════════════════════════════════════
+
+// IA de atendimento (frioai:*): handler vive em ticket-gemini.js, mas a posse da interação é do roteador.
+interactionRouter.register('ticket-ai', i => ticketGemini.matchesInteraction(i), i => ticketGemini.handleInteraction(i));
 
 interactionRouter.register('legacy-core', i => !isDedicatedInteraction(i), async (i) => {
   // Member/Me fetches were previously blocking every button/select for seconds.

@@ -1,5 +1,6 @@
 'use strict';
 const { log, sanitize } = require('./logger');
+const { installEmojiRecovery } = require('./emojiRecovery');
 
 /** Dispatches ONE interaction to ONE owner. No blanket ACK: modals must use showModal() first. */
 function createInteractionRouter(client, options = {}) {
@@ -18,6 +19,7 @@ function createInteractionRouter(client, options = {}) {
 
   async function dispatch(interaction) {
     if (!interaction?.isRepliable?.()) return;
+    installEmojiRecovery(interaction, method => log('warn', 'invalid_custom_emoji_recovered', { method, id: String(interaction.customId || interaction.commandName || 'unknown'), guild: interaction.guildId || 'DM' }));
     if (options.beforeDispatch) await options.beforeDispatch(interaction);
     const startedAt = Date.now();
     const id = String(interaction.customId || (interaction.isChatInputCommand?.() ? `/${interaction.commandName}` : `type:${interaction.type}`));

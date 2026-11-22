@@ -107,7 +107,13 @@ module.exports = function setupTicketGemini({ client, supabase, isTicketStaff, i
       return text ? { text } : { error: 'A IA não conseguiu formular uma resposta. Reformule a pergunta ou chame a equipe.' };
     } catch (err) { console.error('[TICKET-IA] Falha Gemini:', err.name === 'AbortError' ? `timeout ${timeoutMs}ms` : err.message); return { error: err.name === 'AbortError' ? 'A IA demorou além do esperado. Tente novamente ou solicite atendimento humano.' : 'Não foi possível conectar ao Gemini. Tente novamente ou chame a equipe.' };  } finally { clearTimeout(timer); }
   }
-  client.on('interactionCreate', async interaction => {
+  // Dono único das interações frioai:* — chamado pelo interactionRouter (não registra listener próprio,
+  // senão o roteador central responde "menu indisponível" antes e o botão falha).
+  const matchesInteraction = interaction => {
+    const id = String(interaction?.customId || '');
+    return id.startsWith('frioai:') && (!!interaction.isButton?.() || (!!interaction.isModalSubmit?.() && id === 'frioai:teach:submit'));
+  };
+  async function handleInteraction(interaction) {
     if (interaction.isModalSubmit?.() && interaction.customId === 'frioai:teach:submit') {
       try {
         if (!interaction.guild || !await isAdmin(interaction.user, interaction.guild)) return interaction.reply({content:'Apenas administradores podem ensinar a IA.', flags:MessageFlags.Ephemeral});
@@ -151,7 +157,7 @@ module.exports = function setupTicketGemini({ client, supabase, isTicketStaff, i
       }
       return interaction.reply({ ...ui('Assistente de atendimento', summary(interaction.guildId, tid)), flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
     } catch (err) { console.error('[TICKET-IA] botão:', err.message); if (!interaction.replied) await interaction.reply({ content: 'Não foi possível atualizar a IA.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
-  });
+  }
   client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild || !message.content) return;
     const raw = message.content.trim();
@@ -201,5 +207,5 @@ module.exports = function setupTicketGemini({ client, supabase, isTicketStaff, i
       if (mentionHistory.size > 500) mentionHistory.clear();
     }
   });
-  return { makeRow, globalEnabled, ticketEnabled, guildStatus };
+  return { makeRow, globalEnabled, ticketEnabled, guildStatus, matchesInteraction, handleInteraction };
 };
