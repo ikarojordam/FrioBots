@@ -605,15 +605,18 @@ async function saveVerificationSettings(guildId, config) {
   if (error) throw error;
 }
 function verificationEntryUrl(guildId) {
-  const origin = process.env.PUBLIC_BASE_URL || (REDIRECT_URI ? new URL(REDIRECT_URI).origin : null);
-  if (!origin || !origin.startsWith('https://')) throw Error('Configure PUBLIC_BASE_URL HTTPS para publicar a verificação.');
-  if (!/^\d{17,20}$/.test(String(guildId))) throw Error('guildId inválido.');
-  return `${origin.replace(/\/$/, '')}/verify/${guildId}`;
+  if (!/^\d{17,20}$/.test(String(guildId))) throw Error('ID de servidor inválido.');
+  if (!REDIRECT_URI) throw Error("Configure REDIRECT_URI com o callback HTTPS da hospedagem do bot.");
+  const callback = new URL(REDIRECT_URI);
+  if (callback.protocol !== "https:" || callback.hostname === "frio-applications-verificacao.stilldeer6.chatgpt.site" ||
+      !["/callback", "/auth/discord/callback"].includes(callback.pathname) || callback.search || callback.hash)
+    throw Error("Use a URL HTTPS do próprio bot, terminando em /callback, como REDIRECT_URI.");
+  return new URL("/verify/" + guildId, callback.origin).href;
 }
 function oauthVerifyUrl(guildId) {
   if (!DISCORD_CLIENT_ID || !REDIRECT_URI || !DISCORD_CLIENT_SECRET) throw Error('Configure DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET e REDIRECT_URI público HTTPS.');
   const params = new URLSearchParams({ client_id: DISCORD_CLIENT_ID, redirect_uri: REDIRECT_URI,
-    response_type: 'code', scope: 'identify guilds.join', state: createOAuthState(VERIFY_SECRET, guildId) });
+    response_type: 'code', prompt: 'consent', scope: 'identify guilds.join', state: createOAuthState(VERIFY_SECRET, guildId) });
   return `https://discord.com/oauth2/authorize?${params}`;
 }
 const consumeOAuthState = createReplayGuard();
@@ -17009,7 +17012,9 @@ app.get('/verify/:guildId', async (req, res) => {
 
     if (!userId) {
       const oauthUrl = oauthVerifyUrl(guildId);
-      return res.redirect(oauthUrl);
+      const state = new URL(oauthUrl).searchParams.get('state');
+      res.cookie('__Host-frio-oauth', state, {httpOnly:true, secure:true, sameSite:'lax', path:'/', maxAge:600000});
+      return res.set('Cache-Control', 'no-store').redirect(oauthUrl);
     }
     if (!/^\d{17,20}$/.test(userId)) {
       return res.status(400).set('Content-Type', 'text/html; charset=utf-8').send('<h1>Erro</h1><p>ID inválido.</p>');
@@ -17067,8 +17072,11 @@ app.post('/verify/:guildId/complete', express.json(), async (req, res) => {
   }
 });
 
-app.get('/callback', async (req, res) => {
+app.get(['/callback', '/auth/discord/callback'], async (req, res) => {
   const { code, state: rawState } = req.query;
+  const browserState = (req.headers.cookie || '').split(/;\s*/).find(c => c.startsWith('__Host-frio-oauth='))?.slice('__Host-frio-oauth='.length);
+  if (!browserState || browserState !== rawState) return res.status(400).send('Abra a verificação novamente pelo botão no Discord.');
+  res.clearCookie('__Host-frio-oauth', {httpOnly:true, secure:true, sameSite:'lax', path:'/'});
   const guildId = checkOAuthVerifyState(rawState);
   // guildId vai direto na URL da API do Discord e no redirect → só aceita ID numérico (evita path injection / open redirect)
   if (!code || !/^\d{17,20}$/.test(guildId)) return res.status(400).send('Parâmetros inválidos ou autorização expirada. Reinicie a verificação.');
@@ -17086,29 +17094,25 @@ app.get('/callback', async (req, res) => {
     });
     const td = await tr.json();
     if (!td.access_token) return res.status(400).send('Erro token.');
+    if (!String(td.scope || '').split(/\s+/).includes('guilds.join')) return res.status(403).send('Permissão de entrada em servidores ausente. Reinicie a verificação.');
     const ur = await fetch('https://discord.com/api/v10/users/@me', { headers: { Authorization: `Bearer ${td.access_token}` } });
     const ud = await ur.json();
     if (!ud.id) return res.status(400).send('Erro usuário.');
 
-    try {
-      await supabase.from('verifications').upsert({
-        user_id: ud.id,
-        access_token: td.access_token,
-        refresh_token: td.refresh_token,
-        expires_at: new Date(Date.now() + td.expires_in * 1000).toISOString(),
-      }, { onConflict: 'user_id' });
-    } catch (e) { console.error('[VERIFICATIONS-UPSERT]', e.message); }
-
+    if (ud.bot || !/^\d{17,20}$/.test(ud.id)) return res.status(403).send('Conta de membro inválida.');
     const joinResponse = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${ud.id}`, {
       method: 'PUT',
       headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ access_token: td.access_token }),
     });
     if (!joinResponse.ok && joinResponse.status !== 204) {
-      console.warn('[OAuth join]', joinResponse.status, (await joinResponse.text()).slice(0,300));
+      return res.status(502).send('O Discord não confirmou a entrada no servidor. Tente novamente.');
     }
-
-    return res.redirect(`/verify/${guildId}?t=${encodeURIComponent(signVerifyToken(guildId, ud.id))}`);
+    const proof = [guildId, ud.id, Date.now() + 120000].join('.');
+    const signature = crypto.createHmac('sha256', DISCORD_CLIENT_SECRET.trim()).update('frio-site-v1:' + proof).digest('base64url');
+    return res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}).redirect(
+      'https://frio-applications-verificacao.stilldeer6.chatgpt.site/#confirmacao=' + proof + '.' + signature
+    );
   } catch (e) {
     console.error('❌ [/callback]', e);
     res.status(500).send('Erro interno.');
