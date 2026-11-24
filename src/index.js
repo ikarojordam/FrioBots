@@ -606,12 +606,7 @@ async function saveVerificationSettings(guildId, config) {
 }
 function verificationEntryUrl(guildId) {
   if (!/^\d{17,20}$/.test(String(guildId))) throw Error('ID de servidor inválido.');
-  if (!REDIRECT_URI) throw Error("Configure REDIRECT_URI com o callback HTTPS da hospedagem do bot.");
-  const callback = new URL(REDIRECT_URI);
-  if (callback.protocol !== "https:" || callback.hostname === "frio-applications-verificacao.stilldeer6.chatgpt.site" ||
-      !["/callback", "/auth/discord/callback"].includes(callback.pathname) || callback.search || callback.hash)
-    throw Error("Use a URL HTTPS do próprio bot, terminando em /callback, como REDIRECT_URI.");
-  return new URL("/verify/" + guildId, callback.origin).href;
+  return `https://frio-applications-verificacao.stilldeer6.chatgpt.site/verify/${guildId}`;
 }
 function oauthVerifyUrl(guildId) {
   if (!DISCORD_CLIENT_ID || !REDIRECT_URI || !DISCORD_CLIENT_SECRET) throw Error('Configure DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET e REDIRECT_URI público HTTPS.');
