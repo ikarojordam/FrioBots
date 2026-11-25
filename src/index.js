@@ -604,9 +604,16 @@ async function saveVerificationSettings(guildId, config) {
   const { error } = await supabase.from('verification_panels').upsert({ guild_id: guildId, config }, { onConflict: 'guild_id' });
   if (error) throw error;
 }
-function verificationEntryUrl(guildId) {
-  if (!/^\d{17,20}$/.test(String(guildId))) throw Error('ID de servidor inválido.');
-  return `https://frio-applications-verificacao.stilldeer6.chatgpt.site/verify/${guildId}`;
+function memberAuthorizationUrl(guildId, userId) {
+  const payload = [guildId, userId, Date.now() + 300000, crypto.randomBytes(16).toString('hex')].join('.');
+  const signature = crypto.createHmac('sha256', DISCORD_CLIENT_SECRET.trim())
+    .update('frio-discord-panel-v1:' + payload).digest('base64url');
+  const params = new URLSearchParams({
+    client_id: DISCORD_CLIENT_ID, response_type: 'code', scope: 'identify guilds.join',
+    prompt: 'consent', state: payload + '.' + signature,
+    redirect_uri: 'https://frio-applications-verificacao.stilldeer6.chatgpt.site/auth/discord/callback',
+  });
+  return 'https://discord.com/oauth2/authorize?' + params;
 }
 function oauthVerifyUrl(guildId) {
   if (!DISCORD_CLIENT_ID || !REDIRECT_URI || !DISCORD_CLIENT_SECRET) throw Error('Configure DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET e REDIRECT_URI público HTTPS.');
@@ -633,8 +640,7 @@ function verificationPanelMenu() {
 }
 async function sendVerificationPanel(channel, guildId) {
   const c = await verificationSettings(guildId);
-  const link = verificationEntryUrl(guildId);
-  const btn = new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(String(c.button || 'Verificar').slice(0,80)).setURL(link);
+  const btn = new ButtonBuilder().setStyle(ButtonStyle.Primary).setLabel(String(c.button || 'Verificar').slice(0,80)).setCustomId('frio_verify_member');
   const content = `## ${c.title}\n${c.description}`;
   if (c.style === 'plain') return channel.send({ content: `${content}${c.image ? `\n${c.image}` : ''}`, components: [new ActionRowBuilder().addComponents(btn)] });
   const embed = new EmbedBuilder().setTitle(c.title).setDescription(c.description).setColor(c.color || '#5865F2');
@@ -7491,8 +7497,7 @@ async function setupLojaServer(guild, onProgress = null) {
     // Verificação
     const vCh = created['✅・verificação'];
     if (vCh) {
-      const oauthUrl = verificationEntryUrl(guild.id);
-      const b = new ButtonBuilder().setLabel('Verificar').setEmoji(E.verificado).setStyle(ButtonStyle.Link).setURL(oauthUrl);
+      const b = new ButtonBuilder().setLabel('Verificar').setEmoji(E.verificado).setStyle(ButtonStyle.Primary).setCustomId('frio_verify_member');
       tasks.push(safeSend(vCh, {
         embeds: [new EmbedBuilder().setColor('#00FF00').setTitle(`${E.verificado} Verificação`).setDescription('Clique abaixo para se verificar.')],
         components: [new ActionRowBuilder().addComponents(b)],
@@ -7743,8 +7748,7 @@ async function setupComunidadeServer(guild, onProgress = null) {
 
     const vCh = created['〔✅〕verification'];
     if (vCh) {
-      const oauthUrl = verificationEntryUrl(guild.id);
-      const b = new ButtonBuilder().setLabel('Verificar').setEmoji(E.verificado).setStyle(ButtonStyle.Link).setURL(oauthUrl);
+      const b = new ButtonBuilder().setLabel('Verificar').setEmoji(E.verificado).setStyle(ButtonStyle.Primary).setCustomId('frio_verify_member');
       tasks.push(safeSend(vCh, {
         embeds: [new EmbedBuilder().setColor('#00FF00').setTitle(`${E.verificado} Verificação`).setDescription('Clique para verificar.')],
         components: [new ActionRowBuilder().addComponents(b)],
@@ -11003,6 +11007,15 @@ interactionRouter.register('legacy-core', i => !isDedicatedInteraction(i), async
   // Member/Me fetches were previously blocking every button/select for seconds.
   // Discord provides interaction.member for guild interactions; fetch only inside routes that require it.
   try {
+    if (i.isButton() && i.customId === 'frio_verify_member' && i.guildId) {
+      if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
+        return i.reply({content:'A equipe precisa configurar as credenciais OAuth2 do bot.',flags:EPHEMERAL});
+      }
+      const authorize = new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Autorizar no Discord')
+        .setURL(memberAuthorizationUrl(i.guildId, i.user.id));
+      return i.reply({flags:EPHEMERAL,content:'Autorize a identificação da sua conta e a entrada neste servidor para receber o cargo.',
+        components:[new ActionRowBuilder().addComponents(authorize)]});
+    }
     const isDev = i.user?.id && isDeveloper(i.user.id);
 
     if (i.guild) trackFeatureUsage(i.guild.id, i.isChatInputCommand() ? `cmd_${i.commandName}` : (i.customId?.split(':')[0] || 'unknown')).catch(() => {});
@@ -16664,6 +16677,7 @@ client.on('messageCreate', async (m) => {
 // READY
 // ═══════════════════════════════════════════════════════════
 client.once('ready', async () => {
+  require('./siteVerificationWorker').startSiteVerification(client, verificationSettings, DISCORD_CLIENT_SECRET);
   try { startStoreWorkers(); } catch (e) { console.error('[LOJA] workers:', e.message); }
   console.log(`✅ ${client.user.tag} online!`);
   console.log(`🔍 [READY] ${client.guilds.cache.size} guilds...`);
