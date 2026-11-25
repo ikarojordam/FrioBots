@@ -10691,7 +10691,8 @@ async function roletaGirar(i) {
 // Namespace ownership prevents multiple handlers from racing for the same ACK.
 function isDedicatedInteraction(i) {
   const cid = i.customId || '';
-  return (i.isChatInputCommand() && ['dev','admin'].includes(i.commandName))
+  return cid.startsWith('frio_prefix:')
+    || (i.isChatInputCommand() && ['dev','admin'].includes(i.commandName))
     || (i.isButton() && ['frio_panel:dev:home','frio_panel:admin:home'].includes(cid))
     || (i.isStringSelectMenu() && ['dev_cat_pick', 'adm_cat_pick', 'roleta_edit:pick', 'roleta_del:pick'].includes(cid))
     || (i.isChatInputCommand() && ['roleta', 'config', 'solicitar'].includes(i.commandName))
@@ -19868,6 +19869,8 @@ interactionRouter.register('backup-actions', i => (i.customId || '').startsWith(
 interactionRouter.register('backup-edit', i => i.isModalSubmit() && (i.customId || '').startsWith('frio_bkp:edit_modal:'), async i=>{try{if(!i.isModalSubmit()||!i.customId.startsWith('frio_bkp:edit_modal:'))return;if(!i.guild||(!isDeveloper(i.user.id)&&!await isAdmin(i.user,i.guild)))return i.reply({content:'Sem permissão.',flags:EPHEMERAL});const key=i.customId.split(':').slice(2).join(':');const {data:rows}=await supabase.from('guild_backups').select('data,created_at').eq('guild_id',i.guild.id).order('created_at',{ascending:false}).limit(50);const row=(rows||[]).find(r=>r.data?.backup_key===key);if(!row)return i.reply({content:'Backup não encontrado.',flags:EPHEMERAL});const data={...row.data,name:i.fields.getTextInputValue('name').trim(),description:i.fields.getTextInputValue('description').trim()};const {error}=await supabase.from('guild_backups').update({data}).eq('guild_id',i.guild.id).eq('created_at',row.created_at);if(error)throw error;return i.reply(await frioBackupMenu(i.guild,'selected',key))}catch(e){console.error('[frio backup edit]',e);try{if(i.isRepliable())return i.reply({content:'Falha ao editar o backup.',flags:EPHEMERAL})}catch{}}});
 
 // A única assinatura de interactionCreate (inclui remap de comandos antes de resolver dono).
+// Prefix + commands: register routes before the interaction router starts.
+require('./prefixCommands').registerPrefixCommands(client, interactionRouter, { isDeveloper });
 interactionRouter.start();
 const stopMemoryMonitor = startMemoryMonitor();
 const httpServer = app.listen(PORT, '0.0.0.0', () => {
