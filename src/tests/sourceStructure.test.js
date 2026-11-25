@@ -6,8 +6,8 @@ test('legacy interface handlers migrated to named central router',()=>{
  assert.match(source,/interactionRouter\.start\(\)/);
  assert.equal((source.match(/interactionRouter\.register\('/g)||[]).length,13);
 });
-test('OAuth panel uses durable server verification URL',()=>{
- assert.match(source,/const link = verificationEntryUrl\(guildId\)/);
+test('OAuth panel generates a personal Discord authorization link',()=>{
+ assert.match(source,/setURL\(memberAuthorizationUrl\(i.guildId, i.user.id\)\)/);
  assert.match(source,/const oauthUrl = oauthVerifyUrl\(guildId\)/);
 });
 test('contains no Components V2 messages or incompatible import flags',()=>{
